@@ -154,6 +154,23 @@ pub struct QrS3Config {
     pub public_base_url: String, // CloudFront URL if used
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum QrErrorCorrection {
+    Low,    // ~7%
+    Medium, // ~15%
+    Quartile, // ~25%
+    High,   // ~30%
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum QrImageFormat {
+    Png,
+    Jpeg,
+    Svg,
+}
 // QR Code generation settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QrGenerationSettings {
@@ -171,22 +188,7 @@ pub struct QrGenerationSettings {
     pub format: QrImageFormat,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "uppercase")]
-pub enum QrErrorCorrection {
-    Low,    // ~7%
-    Medium, // ~15%
-    Quartile, // ~25%
-    High,   // ~30%
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "uppercase")]
-pub enum QrImageFormat {
-    Png,
-    Jpeg,
-    Svg,
-}
 
 impl QrCodeMetadata {
     /// Create a new QR code metadata entry

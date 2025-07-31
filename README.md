@@ -48,7 +48,29 @@ Performance tracking (response times, success rates)
 │   │   ├── qr_generator.rs        # QR code generation logic
 │   │   ├── s3_service.rs          # AWS S3 upload/download
 │   │   ├── property_service.rs    # MongoDB property queries
-│   │   └── analytics_service.rs   # Scan tracking service
+
+📁 services/analytics_service.rs   # Scan tracking service
+
+Usage example:
+
+// Record a scan
+let scan_id = analytics_service.record_scan(
+    property_id,
+    qr_version,
+    ScanSource::QrCode,
+    RedirectType::DualRedirect,
+    Some(user_agent),
+    Some(ip_address),
+    Some(session_id),
+    referrer,
+).await?;
+
+// Get property analytics
+let analytics = analytics_service
+    .get_property_analytics(&property_id, true)
+    .await?;
+
+
 │   ├── handlers/
 │   │   ├── mod.rs
 │   │   ├── qr_handler.rs          # Generate QR endpoints
@@ -67,12 +89,13 @@ Performance tracking (response times, success rates)
 ├── Dockerfile
 ├── docker-compose.yml
 └── deploy/
-    ├── terraform/                 # Infrastructure as Code
+    ├── cloudformation/                 # Infrastructure as Code
     │   ├── main.tf
     │   ├── s3.tf
     │   └── ecs.tf
     └── github-actions/
         └── deploy.yml             # CI/CD pipeline
+        buildspec.yml
 2. Key Data Structures
 Property Struct (MongoDB mapping)
 rust#[derive(Debug, Serialize, Deserialize)]

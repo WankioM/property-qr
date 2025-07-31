@@ -1,1 +1,79 @@
+# Rust Build Artifacts
+property-qr/target/
+property-qr/**/target/
+property-qr/Cargo.lock
+
+# IDE and Editor Files
+property-qr/.vscode/
+property-qr/.idea/
+property-qr/*.swp
+property-qr/*.swo
+property-qr/*~
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment Variables
 property-qr/.env
+property-qr/.env.local
+property-qr/.env.production
+property-qr/.env.staging
+
+# AWS Credentials (NEVER commit these!)
+property-qr/.aws/
+property-qr/aws-credentials.json
+property-qr/*.pem
+
+# Logs
+property-qr/*.log
+property-qr/logs/
+
+# Temporary Files
+property-qr/*.tmp
+property-qr/*.temp
+property-qr/temp/
+property-qr/tmp/
+
+# Coverage Reports
+property-qr/tarpaulin-report.html
+property-qr/cobertura.xml
+property-qr/lcov.info
+
+# Benchmarking Results
+property-qr/criterion/
+
+# Documentation Build
+property-qr/docs/book/
+
+# Backup Files
+property-qr/*.bak
+property-qr/*.backup
+
+# Lock Files (for workspace projects, sometimes you want to commit Cargo.lock)
+# Uncomment the next line if you're building a library (not an application)
+# Cargo.lock
+
+# RustRover (JetBrains Rust IDE)
+property-qr/.fleet/
+
+# Property-QR Specific
+# Generated QR codes (if storing locally for testing)
+property-qr/qr-codes/
+property-qr/test-qr/
+
+# Docker
+property-qr/docker-compose.override.yml
+
+# Terraform State (if you end up using it)
+property-qr/*.tfstate
+property-qr/*.tfstate.*
+property-qr/.terraform/
+
+# CloudFormation Generated Files
+property-qr/cloudformation-output.json
