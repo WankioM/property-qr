@@ -6,9 +6,10 @@ use crate::models::{
     QrGenerationStats, DeviceBreakdown, PeriodStats, PeriodComparison,
     ScanAnalyticsResponse, SystemAnalyticsResponse
 };
+use futures_util::stream::TryStreamExt;
 use chrono::{DateTime, Utc, Duration, Datelike};
 use mongodb::{
-    bson::{doc, oid::ObjectId},
+    bson::{doc, oid::ObjectId, DateTime as BsonDateTime},
     Collection, Database,
 };
 use serde_json::Value;
@@ -20,6 +21,11 @@ pub struct AnalyticsService {
     scan_events: Collection<ScanEvent>,
     property_analytics: Collection<PropertyScanAnalytics>,
     system_analytics: Collection<SystemAnalytics>,
+}
+
+
+fn utc_to_bson(dt: chrono::DateTime<Utc>) -> BsonDateTime {
+    BsonDateTime::from_chrono(dt)
 }
 
 impl AnalyticsService {
@@ -74,7 +80,7 @@ impl AnalyticsService {
         scan_event = scan_event.with_response_time(response_time);
 
         // Insert scan event
-        let result = self.scan_events.insert_one(&scan_event, None).await?;
+        let result = self.scan_events.insert_one(&scan_event).await?;
         let scan_id = result.inserted_id.as_object_id().unwrap();
 
         // Update property analytics asynchronously
@@ -126,7 +132,7 @@ impl AnalyticsService {
             scan_event = scan_event.with_device_info(device_info);
         }
 
-        let result = self.scan_events.insert_one(&scan_event, None).await?;
+        let result = self.scan_events.insert_one(&scan_event).await?;
         let scan_id = result.inserted_id.as_object_id().unwrap();
 
         warn!("Recorded failed scan for property {} with ID {}", property_id, scan_id);
@@ -160,7 +166,7 @@ impl AnalyticsService {
                     doc! { 
                         "propertyId": property_id,
                         "scannedAt": { 
-                            "$gte": Utc::now() - Duration::days(7) 
+                            "$gte": utc_to_bson(Utc::now() - Duration::days(7)) 
                         }
                     },
                     None,
@@ -204,7 +210,7 @@ impl AnalyticsService {
         limit: i64,
         days: i64,
     ) -> Result<Vec<PropertyPerformance>, mongodb::error::Error> {
-        let since_date = Utc::now() - Duration::days(days);
+        let since_date = utc_to_bson(Utc::now() - Duration::days(days));
 
         // Aggregate top properties by scan count
         let pipeline = vec![
@@ -265,7 +271,7 @@ impl AnalyticsService {
         property_id: &str,
         days: i64,
     ) -> Result<Vec<DailyScanCount>, mongodb::error::Error> {
-        let since_date = Utc::now() - Duration::days(days);
+        let since_date = utc_to_bson(Utc::now() - Duration::days(days));
 
         let pipeline = vec![
             doc! {
@@ -309,7 +315,7 @@ impl AnalyticsService {
         property_id: Option<&str>,
         days: i64,
     ) -> Result<Vec<CountryStats>, mongodb::error::Error> {
-        let since_date = Utc::now() - Duration::days(days);
+        let since_date = utc_to_bson(Utc::now() - Duration::days(days));
         
         let mut match_doc = doc! {
             "scannedAt": { "$gte": since_date },
@@ -368,7 +374,7 @@ impl AnalyticsService {
 
     /// Delete old scan events (data retention)
     pub async fn cleanup_old_events(&self, retention_days: i64) -> Result<u64, mongodb::error::Error> {
-        let cutoff_date = Utc::now() - Duration::days(retention_days);
+        let cutoff_date = utc_to_bson(Utc::now() - Duration::days(retention_days));
         
         let result = self.scan_events
             .delete_many(doc! { "scannedAt": { "$lt": cutoff_date } }, None)
@@ -397,7 +403,7 @@ impl AnalyticsService {
         analytics.update_with_scan(scan_event);
 
         // Update time-based counters
-        let now = Utc::now();
+        let now = utc_to_bson(Utc::now());
         let today_start = now.date_naive().and_hms_opt(0, 0, 0)
             .unwrap()
             .and_local_timezone(Utc)
@@ -423,13 +429,7 @@ impl AnalyticsService {
 
         // Upsert the analytics
         self.property_analytics
-            .replace_one(
-                doc! { "propertyId": property_id },
-                &analytics,
-                mongodb::options::ReplaceOptions::builder()
-                    .upsert(true)
-                    .build(),
-            )
+        .replace_one(filter, &analytics).upsert(true)
             .await?;
 
         Ok(())
@@ -444,11 +444,11 @@ impl AnalyticsService {
             .count_documents(doc! {}, None)
             .await? as i64;
 
-        let today_start = Utc::now().date_naive()
+        let today_start = utc_to_bson(Utc::now().date_naive()
             .and_hms_opt(0, 0, 0)
             .unwrap()
             .and_local_timezone(Utc)
-            .unwrap();
+            .unwrap());
 
         let scans_today = self.scan_events
             .count_documents(doc! { "scannedAt": { "$gte": today_start } }, None)
@@ -456,20 +456,14 @@ impl AnalyticsService {
 
         system_analytics.total_scans_all_time = total_scans;
         system_analytics.total_scans_today = scans_today;
-        system_analytics.last_updated = Utc::now();
+        system_analytics.last_updated = utc_to_bson(Utc::now());
 
         // Update top performing properties
         system_analytics.top_performing_properties = self.get_top_performing_properties(10, 30).await?;
 
         // Upsert system analytics
         self.system_analytics
-            .replace_one(
-                doc! {},
-                &system_analytics,
-                mongodb::options::ReplaceOptions::builder()
-                    .upsert(true)
-                    .build(),
-            )
+        .replace_one(filter, &analytics).upsert(true)
             .await?;
 
         Ok(())
@@ -498,7 +492,7 @@ impl AnalyticsService {
                         average_generation_time: None,
                         failure_rate: 0.0,
                     },
-                    last_updated: Utc::now(),
+                    last_updated: utc_to_bson(Utc::now()),
                 };
                 
                 self.system_analytics.insert_one(&new_analytics, None).await?;
@@ -509,7 +503,7 @@ impl AnalyticsService {
 
     /// Calculate period comparison (current vs previous period)
     async fn calculate_period_comparison(&self) -> Result<PeriodComparison, mongodb::error::Error> {
-        let now = Utc::now();
+        let now = utc_to_bson(Utc::now());
         let thirty_days_ago = now - Duration::days(30);
         let sixty_days_ago = now - Duration::days(60);
 

@@ -43,16 +43,55 @@ Device detection from user agent strings
 Geographic and temporal analytics support
 Performance tracking (response times, success rates)
 
-│   ├── services/
-│   │   ├── mod.rs
-│   │   ├── qr_generator.rs        # QR code generation logic
-│   │   ├── s3_service.rs          # AWS S3 upload/download
-│   │   ├── property_service.rs    # MongoDB property queries
+***Services***
+
+📁 services/mod.rs
+
+Module declarations and re-exports for all services
+
+📁 services/property_service.rs
+Core Property Management Service:
+
+✅ Property retrieval by ID with validation
+✅ QR eligibility checking with detailed reasons
+✅ Batch property operations for multiple IDs
+✅ Property statistics and analytics
+✅ Search functionality with filters (location, price, type, verification)
+✅ Owner-based queries and recent properties
+✅ Click tracking for analytics integration
+✅ Comprehensive error handling with custom error types
+
+📁 services/qr_generator.rs
+QR Code Generation Engine:
+
+✅ Single QR generation with force regeneration support
+✅ Batch QR generation for multiple properties
+✅ QR code lifecycle management (create, update, deactivate, delete)
+✅ Expiration handling and regeneration detection
+✅ Comprehensive metadata storage with property info
+✅ Integration ready for actual QR libraries (qrcode crate)
+✅ S3 upload integration for QR images
+✅ Error handling with detailed error types and codes
+
+📁 services/s3_service.rs
+AWS S3 Storage Management:
+
+✅ QR image upload/download with proper content types
+✅ Metadata file management for JSON data
+✅ CloudFront integration for CDN support
+✅ Presigned URL generation for direct uploads
+✅ File operations (exists, delete, metadata retrieval)
+✅ Batch operations and cleanup utilities
+✅ Bucket statistics and monitoring
+✅ Key validation and URL construction
+✅ Ready for aws-sdk-s3 integration (placeholder implementations)
 
 📁 services/analytics_service.rs   # Scan tracking service
 
 Usage example:
 
+
+```
 // Record a scan
 let scan_id = analytics_service.record_scan(
     property_id,
@@ -69,6 +108,7 @@ let scan_id = analytics_service.record_scan(
 let analytics = analytics_service
     .get_property_analytics(&property_id, true)
     .await?;
+```
 
 
 │   ├── handlers/
@@ -160,8 +200,10 @@ Immediately redirects to DAO-Bitat property page
 Opens second tab/window to Base testnet explorer
 Tracks the scan event
 
-5. AWS Infrastructure Requirements
-S3 Bucket Structure
+## 5. AWS Infrastructure Requirements (Serverless Architecture)
+
+### S3 Bucket Structure
+```
 daobitat-qr-codes/
 ├── qr-images/
 │   ├── 67ec31596333aba221e84df8.png
@@ -169,43 +211,103 @@ daobitat-qr-codes/
 └── metadata/
     ├── 67ec31596333aba221e84df8.json
     └── ...
-Required AWS Services
+```
 
-ECS/Fargate: Container hosting
-S3: QR code image storage
-CloudFront: CDN for QR images
-Application Load Balancer: Traffic routing
-Route 53: DNS management
-IAM: Service permissions
+### Required AWS Services (Cost-Optimized)
 
-6. CI/CD Deployment Strategy
-GitHub Actions Pipeline
-yaml# .github/workflows/deploy.yml
-name: Deploy QR Service
-on:
-  push:
-    branches: [main]
-    
-jobs:
-  deploy:
-    - Build Docker image
-    - Push to ECR
-    - Deploy to ECS via Terraform
-    - Run health checks
-    - Update Route 53 if needed
-Terraform Infrastructure
+**Core Services:**
+- **AWS Lambda**: Rust runtime for QR generation logic
+- **API Gateway**: REST API endpoints (`/generate`, `/scan/{id}`)
+- **S3**: QR code image storage with public read access
+- **CloudFront**: CDN for QR images (optional for cost savings)
 
-ECR Repository: Docker image storage
-ECS Cluster: Container orchestration
-S3 Bucket: QR code storage with public read access
-IAM Roles: Service permissions
-Security Groups: Network access control
+**Supporting Services:**
+- **IAM**: Lambda execution roles and S3 permissions
+- **Route 53**: DNS management (if custom domain needed)
+- **CloudWatch**: Logging and monitoring
 
-QR Generation: < 500ms per QR code
-S3 Upload: < 1s per image
-Scan Redirect: < 100ms response time
-Batch Processing: Handle 100+ properties at once
-Concurrent Scans: Support 1000+ simultaneous scans
+**Cost Comparison:**
+- **ECS/Fargate**: ~$30-50/month (always running)
+- **Lambda**: ~$5-15/month (pay per request)
+- **Savings**: 70-80% cost reduction
+
+## 6. CI/CD Deployment Strategy (AWS CodePipeline)
+
+### CodePipeline Architecture
+```
+GitHub → CodeBuild → Lambda Deployment
+    ↓
+CloudFormation (Infrastructure)
+    ↓
+S3 + API Gateway + Lambda
+```
+
+### buildspec.yml (CodeBuild Configuration)
+```yaml
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      - source ~/.cargo/env
+      - rustup target add x86_64-unknown-linux-musl
+      
+  build:
+    commands:
+      - cargo build --release --target x86_64-unknown-linux-musl
+      - cp target/x86_64-unknown-linux-musl/release/property-qr bootstrap
+      - zip lambda-deployment.zip bootstrap
+      
+artifacts:
+  files:
+    - lambda-deployment.zip
+    - deploy/cloudformation/*.yml
+```
+
+### CloudFormation Infrastructure
+
+**Core Stack (`infrastructure.yml`):**
+- **Lambda Function**: Rust binary deployment
+- **API Gateway**: REST API with `/generate` and `/scan/{id}` endpoints
+- **S3 Bucket**: QR storage with public read policy
+- **IAM Roles**: Lambda execution with S3 write permissions
+- **CloudWatch Logs**: Function logging
+
+**Pipeline Stack (`pipeline.yml`):**
+- **CodePipeline**: GitHub → CodeBuild → CloudFormation
+- **CodeBuild Project**: Rust compilation and packaging
+- **S3 Artifact Store**: Pipeline artifacts storage
+
+### Deployment Flow
+1. **Source Stage**: GitHub webhook triggers pipeline
+2. **Build Stage**: CodeBuild compiles Rust → Lambda zip
+3. **Deploy Stage**: CloudFormation updates Lambda function
+4. **Test Stage**: Automated health checks via API Gateway
+
+
+
+### Environment Configuration
+```yaml
+# Parameters for different environments
+Development:
+  - Lambda Memory: 128MB 
+  - S3 Storage Class: Standard
+  - API Gateway: Regional
+
+Production:
+  - Lambda Memory: 256MB 
+  - S3 Storage Class: Intelligent Tiering
+  - API Gateway: Edge Optimized + CloudFront
+```
+
+
+
+### Monitoring & Alerts
+- **CloudWatch Dashboards**: Lambda performance metrics
+- **Cost Alerts**: Billing notifications if over budget
+- **Error Tracking**: Failed QR generations and scan redirects
 
 8. Integration Points
 MongoDB Integration
