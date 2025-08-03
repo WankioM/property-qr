@@ -6,10 +6,74 @@ A Rust Axum microservice that generates property QR codes, stores them in AWS S3
 qr-payment-service/
 ├── src/
 │   ├── main.rs                    # Entry point & server setup
-│   ├── config/
-│   │   ├── mod.rs
-│   │   ├── settings.rs            # App config (AWS, MongoDB, URLs)
-│   │   └── aws.rs                 # AWS S3 client setup
+
+***Config***
+Configuration System (src/config/)
+Purpose: Centralized configuration management with environment variable support and validation.
+
+mod.rs - Module declarations and re-exports
+settings.rs - Main configuration struct with environment loading
+aws.rs - AWS-specific configuration for S3, CloudFront, and credentials
+
+Key Features:
+
+Environment-based configuration loading (Settings::from_env())
+Pre-configured environments (development, staging, production)
+Built-in validation for all config values
+Support for AWS services with LocalStack compatibility
+Automatic URL generation for S3 and CloudFront resources
+
+Usage:
+```
+rust// Load from environment variables
+let settings = Settings::from_env()?;
+
+// Use predefined configurations
+let dev_config = Settings::default_dev();
+let prod_config = Settings::default_prod();
+
+// Access configuration
+let api_url = settings.api_base_url();
+let s3_url = settings.s3_public_url("qr-images/property123.png");
+```
+
+**Errors**
+Configuration System (src/errors/)
+Purpose: Structured error handling with HTTP status mapping and rich context information.
+Files:
+
+mod.rs - Module declarations and re-exports
+app_error.rs - Main error types, conversions, and Axum integration
+
+Key Features:
+
+Structured Error Codes - Categorized error types (validation, database, S3, etc.)
+HTTP Status Mapping - Automatic conversion to appropriate HTTP status codes
+Rich Context - Property IDs, operation names, and additional metadata
+Auto-conversion - From MongoDB, IO, JSON, and other common error types
+Axum Integration - Direct IntoResponse implementation for handlers
+Helper Macros - app_error!, bail!, ensure! for convenient error creation
+
+Usage:
+```
+rustuse crate::errors::{AppError, AppResult, ErrorCode};
+
+// Simple error creation
+return Err(AppError::property_not_found("prop123"));
+
+// Using macros
+bail!(ErrorCode::InvalidInput, "Missing required field");
+ensure!(!id.is_empty(), ErrorCode::InvalidInput, "ID required");
+
+// Error with context
+
+app_error!(
+    ErrorCode::QrGenerationFailed,
+    "Generation failed",
+    with_property_id = "prop123",
+    with_operation = "qr_generation"
+);
+```
 
 ***Models***
 
