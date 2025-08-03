@@ -1,5 +1,3 @@
-// src/utils/url_builder.rs
-
 use std::collections::HashMap;
 
 /// URL builder utility for constructing application URLs

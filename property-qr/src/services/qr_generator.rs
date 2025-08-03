@@ -7,9 +7,9 @@ use crate::models::{
 };
 use crate::services::{PropertyService, S3Service};
 use mongodb::{
-    bson::{doc, oid::ObjectId},
-    Collection, Database,
-};
+    bson::{doc, oid::ObjectId}, 
+options::FindOptions, Collection, Database};
+
 use chrono::Utc;
 use std::collections::HashMap;
 use tracing::{info, warn, error};
@@ -31,6 +31,11 @@ pub enum QrGeneratorError {
     S3UploadFailed(String),
     DatabaseError(mongodb::error::Error),
     InvalidPropertyId,
+}
+
+// Helper function to convert chrono DateTime to BSON DateTime
+fn utc_to_bson(dt: chrono::DateTime<chrono::Utc>) -> mongodb::bson::DateTime {
+    mongodb::bson::DateTime::from_millis(dt.timestamp_millis())
 }
 
 impl From<mongodb::error::Error> for QrGeneratorError {
@@ -260,7 +265,7 @@ impl QrGeneratorService {
 
         // Delete from database
         let result = self.qr_metadata
-            .delete_one(doc! { "propertyId": property_id }, None)
+        .delete_one(doc! { "propertyId": property_id })
             .await?;
 
         Ok(result.deleted_count > 0)
@@ -271,12 +276,12 @@ impl QrGeneratorService {
         let update = doc! {
             "$set": {
                 "isActive": false,
-                "lastUpdated": Utc::now()
+                "lastUpdated": utc_to_bson(Utc::now())
             }
         };
 
         let result = self.qr_metadata
-            .update_one(doc! { "propertyId": property_id }, update, None)
+        .update_one(doc! { "propertyId": property_id }, update)
             .await?;
 
         Ok(result.modified_count > 0)
@@ -288,13 +293,20 @@ impl QrGeneratorService {
         limit: Option<i64>,
         skip: Option<u64>,
     ) -> Result<Vec<QrCodeMetadata>, QrGeneratorError> {
-        let options = mongodb::options::FindOptions::builder()
-            .limit(limit)
-            .skip(skip)
-            .sort(doc! { "generatedAt": -1 })
-            .build();
+        let options = if let Some(limit) = limit {  
+    mongodb::options::FindOptions::builder()
+        .limit(limit)
+        .skip(skip)
+        .sort(doc! { "generatedAt": -1 })
+        .build()
+} else {
+    mongodb::options::FindOptions::builder()
+        .skip(skip)
+        .sort(doc! { "generatedAt": -1 })
+        .build()
+};
 
-        let mut cursor = self.qr_metadata.find(doc! {}, options).await?;
+        let mut cursor = self.qr_metadata.find(doc! {}).with_options(options).await?;
         let mut qr_codes = Vec::new();
 
         while cursor.advance().await? {
@@ -310,11 +322,11 @@ impl QrGeneratorService {
         let cutoff_date = Utc::now() - chrono::Duration::days(expiry_days);
         
         let filter = doc! {
-            "generatedAt": { "$lt": cutoff_date },
+            "generatedAt": { "$lt": utc_to_bson(cutoff_date) },
             "isActive": true
         };
 
-        let mut cursor = self.qr_metadata.find(filter, None).await?;
+        let mut cursor = self.qr_metadata.find(filter).await?;
         let mut property_ids = Vec::new();
 
         while cursor.advance().await? {
@@ -362,7 +374,7 @@ impl QrGeneratorService {
     /// Private helper methods
     async fn get_existing_qr(&self, property_id: &str) -> Result<QrCodeMetadata, QrGeneratorError> {
         self.qr_metadata
-            .find_one(doc! { "propertyId": property_id }, None)
+        .find_one(doc! { "propertyId": property_id })
             .await?
             .ok_or(QrGeneratorError::PropertyNotFound)
     }
@@ -374,13 +386,13 @@ impl QrGeneratorService {
             .build();
 
         self.qr_metadata
-        .replace_one(filter, qr_metadata, options)
+        .replace_one(filter, qr_metadata).with_options(options)
         .await?;
 
     Ok(())
 }
 
-async fn generate_qr_image(&self, qr_data: &str) -> Result<Vec<u8>, QrGeneratorError> {
+async fn generate_qr_image(&self, _qr_data: &str) -> Result<Vec<u8>, QrGeneratorError> {
     // TODO: Implement actual QR code generation using qrcode crate
     // For now, return a placeholder
     // 
@@ -411,7 +423,7 @@ async fn get_all_qr_property_ids(&self) -> Result<Vec<String>, QrGeneratorError>
         .projection(projection)
         .build();
 
-    let mut cursor = self.qr_metadata.find(doc! {}, options).await?;
+    let mut cursor = self.qr_metadata.find(doc! {}).with_options(options).await?;
     let mut property_ids = Vec::new();
 
     while cursor.advance().await? {

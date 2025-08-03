@@ -1,13 +1,12 @@
- // src/services/property_service.rs
+// src/services/property_service.rs
 
 use crate::models::{Property, PropertyQrInfo};
 use mongodb::{
-    bson::{doc, oid::ObjectId},
+    bson::{doc, oid::ObjectId, DateTime as BsonDateTime},
     Collection, Database, options::FindOptions,
 };
-use serde_json::Value;
 use std::str::FromStr;
-use tracing::{info, warn, error};
+use tracing::info;
 
 #[derive(Clone)]
 pub struct PropertyService {
@@ -41,6 +40,11 @@ impl std::fmt::Display for PropertyError {
 
 impl std::error::Error for PropertyError {}
 
+// Helper function to convert chrono DateTime to BSON DateTime
+fn utc_to_bson(dt: chrono::DateTime<chrono::Utc>) -> BsonDateTime {
+    BsonDateTime::from_millis(dt.timestamp_millis())
+}
+
 impl PropertyService {
     /// Create a new property service
     pub fn new(db: &Database) -> Self {
@@ -55,7 +59,7 @@ impl PropertyService {
             .map_err(|_| PropertyError::InvalidId)?;
 
         let property = self.properties
-            .find_one(doc! { "_id": object_id }, None)
+            .find_one(doc! { "_id": object_id })
             .await?
             .ok_or(PropertyError::NotFound)?;
 
@@ -86,7 +90,7 @@ impl PropertyService {
         }
 
         let filter = doc! { "_id": { "$in": object_ids } };
-        let mut cursor = self.properties.find(filter, None).await?;
+        let mut cursor = self.properties.find(filter).await?;
         let mut properties = Vec::new();
 
         while cursor.advance().await? {
@@ -105,12 +109,19 @@ impl PropertyService {
             "price": { "$gt": 0 }
         };
 
-        let options = FindOptions::builder()
-            .limit(limit)
-            .sort(doc! { "createdAt": -1 })
-            .build();
+        let options = if let Some(limit) = limit {
+            FindOptions::builder()
+                .limit(limit)
+                .sort(doc! { "createdAt": -1 })
+                .build()
+        } else {
+            FindOptions::builder()
+                .sort(doc! { "createdAt": -1 })
+                .build()
+        };
+       
 
-        let mut cursor = self.properties.find(filter, options).await?;
+        let mut cursor = self.properties.find(filter).with_options(options).await?;
         let mut qr_infos = Vec::new();
 
         while cursor.advance().await? {
@@ -134,7 +145,7 @@ impl PropertyService {
             "_id": { "$nin": qr_property_ids }
         };
 
-        let mut cursor = self.properties.find(filter, None).await?;
+        let mut cursor = self.properties.find(filter).await?;
         let mut properties_needing_qr = Vec::new();
 
         while cursor.advance().await? {
@@ -160,25 +171,25 @@ impl PropertyService {
     /// Get property statistics
     pub async fn get_property_stats(&self) -> Result<PropertyStats, PropertyError> {
         let total_properties = self.properties
-            .count_documents(doc! {}, None)
+            .count_documents(doc! {})
             .await? as i64;
 
         let active_properties = self.properties
-            .count_documents(doc! { "removed": { "$ne": true } }, None)
+            .count_documents(doc! { "removed": { "$ne": true } })
             .await? as i64;
 
         let verified_properties = self.properties
             .count_documents(doc! { 
                 "removed": { "$ne": true },
                 "isVerified": true 
-            }, None)
+            })
             .await? as i64;
 
         let properties_with_images = self.properties
             .count_documents(doc! { 
                 "removed": { "$ne": true },
                 "images.0": { "$exists": true }
-            }, None)
+            })
             .await? as i64;
 
         let qr_eligible_properties = self.properties
@@ -186,7 +197,7 @@ impl PropertyService {
                 "removed": { "$ne": true },
                 "images.0": { "$exists": true },
                 "price": { "$gt": 0 }
-            }, None)
+            })
             .await? as i64;
 
         Ok(PropertyStats {
@@ -208,15 +219,17 @@ impl PropertyService {
         }
 
         // Add price range filter
-        if let Some(min_price) = criteria.min_price {
-            filter.insert("price", doc! { "$gte": min_price });
-        }
-        if let Some(max_price) = criteria.max_price {
-            let price_filter = filter.get_document_mut("price")
-                .unwrap_or(&mut doc! {});
-            price_filter.insert("$lte", max_price);
-        }
-
+      // Add price range filter
+let mut price_conditions = doc! {};
+if let Some(min_price) = criteria.min_price {
+    price_conditions.insert("$gte", min_price);
+}
+if let Some(max_price) = criteria.max_price {
+    price_conditions.insert("$lte", max_price);
+}
+if !price_conditions.is_empty() {
+    filter.insert("price", price_conditions);
+}
         // Add property type filter
         if let Some(property_type) = criteria.property_type {
             filter.insert("propertyType", property_type);
@@ -232,12 +245,18 @@ impl PropertyService {
             filter.insert("onchainId", doc! { "$exists": true, "$ne": null });
         }
 
-        let options = FindOptions::builder()
-            .limit(criteria.limit)
-            .sort(doc! { "createdAt": -1 })
-            .build();
+        let options = if let Some(limit) = criteria.limit {
+            FindOptions::builder()
+                .limit(limit)
+                .sort(doc! { "createdAt": -1 })
+                .build()
+        } else {
+            FindOptions::builder()
+                .sort(doc! { "createdAt": -1 })
+                .build()
+        };
 
-        let mut cursor = self.properties.find(filter, options).await?;
+        let mut cursor = self.properties.find(filter).with_options(options).await?;
         let mut properties = Vec::new();
 
         while cursor.advance().await? {
@@ -257,14 +276,14 @@ impl PropertyService {
             "$inc": { "clicks": 1 },
             "$push": { 
                 "clickHistory": { 
-                    "timestamp": chrono::Utc::now(),
+                    "timestamp": utc_to_bson(chrono::Utc::now()),
                     "_id": ObjectId::new()
                 }
             }
         };
 
         self.properties
-            .update_one(doc! { "_id": object_id }, update, None)
+            .update_one(doc! { "_id": object_id }, update)
             .await?;
 
         Ok(())
@@ -280,7 +299,7 @@ impl PropertyService {
             "removed": { "$ne": true }
         };
 
-        let mut cursor = self.properties.find(filter, None).await?;
+        let mut cursor = self.properties.find(filter).await?;
         let mut properties = Vec::new();
 
         while cursor.advance().await? {
@@ -295,11 +314,11 @@ impl PropertyService {
     pub async fn get_recent_properties(&self, limit: i64) -> Result<Vec<PropertyQrInfo>, PropertyError> {
         let filter = doc! { "removed": { "$ne": true } };
         let options = FindOptions::builder()
-            .limit(Some(limit))
+            .limit(limit)
             .sort(doc! { "createdAt": -1 })
             .build();
 
-        let mut cursor = self.properties.find(filter, options).await?;
+        let mut cursor = self.properties.find(filter).with_options(options).await?;
         let mut recent_properties = Vec::new();
 
         while cursor.advance().await? {

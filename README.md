@@ -1,7 +1,8 @@
-QR Code Payment Generator Microservice - High Level Implementation Plan
-Service Overview
+# QR Code Payment Generator Microservice
+
 A Rust Axum microservice that generates property QR codes, stores them in AWS S3, and provides scanning endpoints that redirect to both DAO-Bitat property pages and Base testnet blockchain explorers.
-1. Core Files Structure
+
+## Core Files Structure
 qr-payment-service/
 ├── src/
 │   ├── main.rs                    # Entry point & server setup
@@ -226,10 +227,7 @@ daobitat-qr-codes/
 - **Route 53**: DNS management (if custom domain needed)
 - **CloudWatch**: Logging and monitoring
 
-**Cost Comparison:**
-- **ECS/Fargate**: ~$30-50/month (always running)
-- **Lambda**: ~$5-15/month (pay per request)
-- **Savings**: 70-80% cost reduction
+
 
 ## 6. CI/CD Deployment Strategy (AWS CodePipeline)
 

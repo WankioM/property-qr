@@ -1,16 +1,16 @@
- // src/services/analytics_service.rs
+// src/services/analytics_service.rs
 
 use crate::models::{
     ScanEvent, PropertyScanAnalytics, SystemAnalytics, ScanSource, RedirectType, 
     DeviceInfo, GeoLocation, CountryStats, DailyScanCount, PropertyPerformance,
-    QrGenerationStats, DeviceBreakdown, PeriodStats, PeriodComparison,
+    QrGenerationStats, PeriodStats, PeriodComparison,
     ScanAnalyticsResponse, SystemAnalyticsResponse
 };
 use futures_util::stream::TryStreamExt;
 use chrono::{DateTime, Utc, Duration, Datelike};
 use mongodb::{
     bson::{doc, oid::ObjectId, DateTime as BsonDateTime},
-    Collection, Database,
+    Collection, Database, options::{ReplaceOptions, FindOptions},
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -23,9 +23,15 @@ pub struct AnalyticsService {
     system_analytics: Collection<SystemAnalytics>,
 }
 
-
+// Helper function to convert chrono DateTime to BSON DateTime
 fn utc_to_bson(dt: chrono::DateTime<Utc>) -> BsonDateTime {
-    BsonDateTime::from_chrono(dt)
+    BsonDateTime::from_millis(dt.timestamp_millis())
+}
+
+// Helper function to convert BSON DateTime to chrono DateTime
+fn bson_to_utc(dt: BsonDateTime) -> chrono::DateTime<Utc> {
+    chrono::DateTime::from_timestamp_millis(dt.timestamp_millis())
+        .unwrap_or_else(|| Utc::now())
 }
 
 impl AnalyticsService {
@@ -147,14 +153,14 @@ impl AnalyticsService {
     ) -> Result<ScanAnalyticsResponse, mongodb::error::Error> {
         // Get or create property analytics
         let analytics = match self.property_analytics
-            .find_one(doc! { "propertyId": property_id }, None)
+            .find_one(doc! { "propertyId": property_id })
             .await?
         {
             Some(analytics) => analytics,
             None => {
                 // Create new analytics entry
                 let new_analytics = PropertyScanAnalytics::new(property_id.to_string());
-                self.property_analytics.insert_one(&new_analytics, None).await?;
+                self.property_analytics.insert_one(&new_analytics).await?;
                 new_analytics
             }
         };
@@ -162,15 +168,12 @@ impl AnalyticsService {
         // Get recent scans if requested
         let recent_scans = if include_recent_scans {
             self.scan_events
-                .find(
-                    doc! { 
-                        "propertyId": property_id,
-                        "scannedAt": { 
-                            "$gte": utc_to_bson(Utc::now() - Duration::days(7)) 
-                        }
-                    },
-                    None,
-                )
+                .find(doc! { 
+                    "propertyId": property_id,
+                    "scannedAt": { 
+                        "$gte": utc_to_bson(Utc::now() - Duration::days(7)) 
+                    }
+                })
                 .await?
                 .try_collect()
                 .await?
@@ -247,7 +250,7 @@ impl AnalyticsService {
             doc! { "$limit": limit }
         ];
 
-        let mut cursor = self.scan_events.aggregate(pipeline, None).await?;
+        let mut cursor = self.scan_events.aggregate(pipeline).await?;
         let mut performances = Vec::new();
 
         while cursor.advance().await? {
@@ -294,7 +297,7 @@ impl AnalyticsService {
             doc! { "$sort": { "_id": 1 } }
         ];
 
-        let mut cursor = self.scan_events.aggregate(pipeline, None).await?;
+        let mut cursor = self.scan_events.aggregate(pipeline).await?;
         let mut trends = Vec::new();
 
         while cursor.advance().await? {
@@ -338,7 +341,7 @@ impl AnalyticsService {
             doc! { "$limit": 20 }
         ];
 
-        let mut cursor = self.scan_events.aggregate(pipeline, None).await?;
+        let mut cursor = self.scan_events.aggregate(pipeline).await?;
         let mut countries = Vec::new();
         let mut total_count = 0i64;
 
@@ -377,7 +380,7 @@ impl AnalyticsService {
         let cutoff_date = utc_to_bson(Utc::now() - Duration::days(retention_days));
         
         let result = self.scan_events
-            .delete_many(doc! { "scannedAt": { "$lt": cutoff_date } }, None)
+            .delete_many(doc! { "scannedAt": { "$lt": cutoff_date } })
             .await?;
 
         info!("Cleaned up {} old scan events", result.deleted_count);
@@ -392,7 +395,7 @@ impl AnalyticsService {
     ) -> Result<(), mongodb::error::Error> {
         // Try to find existing analytics
         let mut analytics = match self.property_analytics
-            .find_one(doc! { "propertyId": property_id }, None)
+            .find_one(doc! { "propertyId": property_id })
             .await?
         {
             Some(analytics) => analytics,
@@ -403,7 +406,7 @@ impl AnalyticsService {
         analytics.update_with_scan(scan_event);
 
         // Update time-based counters
-        let now = utc_to_bson(Utc::now());
+        let now = Utc::now();
         let today_start = now.date_naive().and_hms_opt(0, 0, 0)
             .unwrap()
             .and_local_timezone(Utc)
@@ -428,8 +431,11 @@ impl AnalyticsService {
         }
 
         // Upsert the analytics
+        let filter = doc! { "propertyId": property_id };
+        let options = ReplaceOptions::builder().upsert(true).build();
         self.property_analytics
-        .replace_one(filter, &analytics).upsert(true)
+            .replace_one(filter, &analytics)
+            .with_options(options)
             .await?;
 
         Ok(())
@@ -441,7 +447,7 @@ impl AnalyticsService {
 
         // Update counters (this is a simplified version - in production you'd want more efficient aggregations)
         let total_scans = self.scan_events
-            .count_documents(doc! {}, None)
+            .count_documents(doc! {})
             .await? as i64;
 
         let today_start = utc_to_bson(Utc::now().date_naive()
@@ -451,19 +457,22 @@ impl AnalyticsService {
             .unwrap());
 
         let scans_today = self.scan_events
-            .count_documents(doc! { "scannedAt": { "$gte": today_start } }, None)
+            .count_documents(doc! { "scannedAt": { "$gte": today_start } })
             .await? as i64;
 
         system_analytics.total_scans_all_time = total_scans;
         system_analytics.total_scans_today = scans_today;
-        system_analytics.last_updated = utc_to_bson(Utc::now());
+        system_analytics.last_updated = Utc::now();
 
         // Update top performing properties
         system_analytics.top_performing_properties = self.get_top_performing_properties(10, 30).await?;
 
         // Upsert system analytics
+        let filter = doc! {};
+        let options = ReplaceOptions::builder().upsert(true).build();
         self.system_analytics
-        .replace_one(filter, &analytics).upsert(true)
+            .replace_one(filter, &system_analytics)
+            .with_options(options)
             .await?;
 
         Ok(())
@@ -471,7 +480,7 @@ impl AnalyticsService {
 
     /// Get or create system analytics
     async fn get_or_create_system_analytics(&self) -> Result<SystemAnalytics, mongodb::error::Error> {
-        match self.system_analytics.find_one(doc! {}, None).await? {
+        match self.system_analytics.find_one(doc! {}).await? {
             Some(analytics) => Ok(analytics),
             None => {
                 let new_analytics = SystemAnalytics {
@@ -492,10 +501,10 @@ impl AnalyticsService {
                         average_generation_time: None,
                         failure_rate: 0.0,
                     },
-                    last_updated: utc_to_bson(Utc::now()),
+                    last_updated: Utc::now(),
                 };
                 
-                self.system_analytics.insert_one(&new_analytics, None).await?;
+                self.system_analytics.insert_one(&new_analytics).await?;
                 Ok(new_analytics)
             }
         }
@@ -503,26 +512,23 @@ impl AnalyticsService {
 
     /// Calculate period comparison (current vs previous period)
     async fn calculate_period_comparison(&self) -> Result<PeriodComparison, mongodb::error::Error> {
-        let now = utc_to_bson(Utc::now());
+        let now = Utc::now();
         let thirty_days_ago = now - Duration::days(30);
         let sixty_days_ago = now - Duration::days(60);
 
         // Current period (last 30 days)
         let current_scans = self.scan_events
-            .count_documents(doc! { "scannedAt": { "$gte": thirty_days_ago } }, None)
+            .count_documents(doc! { "scannedAt": { "$gte": utc_to_bson(thirty_days_ago) } })
             .await? as i64;
 
         // Previous period (30-60 days ago)
         let previous_scans = self.scan_events
-            .count_documents(
-                doc! { 
-                    "scannedAt": { 
-                        "$gte": sixty_days_ago,
-                        "$lt": thirty_days_ago 
-                    } 
-                }, 
-                None
-            )
+            .count_documents(doc! { 
+                "scannedAt": { 
+                    "$gte": utc_to_bson(sixty_days_ago),
+                    "$lt": utc_to_bson(thirty_days_ago)
+                } 
+            })
             .await? as i64;
 
         let percentage_change = if previous_scans > 0 {
