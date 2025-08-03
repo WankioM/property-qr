@@ -111,12 +111,41 @@ let analytics = analytics_service
     .await?;
 ```
 
+***Handlers***
 
-│   ├── handlers/
-│   │   ├── mod.rs
-│   │   ├── qr_handler.rs          # Generate QR endpoints
-│   │   ├── scan_handler.rs        # QR scan redirect endpoints
-│   │   └── health.rs              # Health check
+📁 handlers/mod.rs
+
+Module declarations and re-exports
+Clean organization of handler modules
+
+📁 handlers/health.rs
+
+Basic health check: /health - Simple service status
+Detailed health check: /health/detailed - Full system metrics
+Liveness probe: /liveness - Kubernetes-style "I'm alive" check
+Readiness probe: /readiness - "Ready to handle requests" check
+Includes system info, memory usage, and service dependency checks
+
+📁 handlers/qr_handler.rs
+
+Generate QR: POST /generate/{property_id} - Single QR generation
+Batch generate: POST /generate/batch - Multiple QR generation
+Get QR: GET /qr/{property_id} - Retrieve existing QR
+Regenerate: PUT /regenerate/{property_id} - Force regeneration
+Delete QR: DELETE /qr/{property_id} - Hard delete
+Deactivate: PATCH /deactivate/{property_id} - Soft delete
+List QRs: GET /qr - Paginated QR list
+Generate missing: POST /generate/missing - Auto-generate for properties without QR
+
+📁 handlers/scan_handler.rs
+
+QR Scan: GET /scan/{property_id} - Handle QR code scans with smart redirect
+Scan API: GET /api/scan/{property_id} - JSON response for scan data
+Dual redirect page - Beautiful HTML page for properties with blockchain presence
+Error pages - User-friendly error handling
+Analytics tracking - Records scan events for analytics
+Auto-redirect - 10-second timer to property page
+
 │   ├── routes/
 │   │   ├── mod.rs
 │   │   └── api.rs                 # Route definitions

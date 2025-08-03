@@ -248,6 +248,7 @@ pub struct ScanRedirectData {
     pub property_id: String,
     #[serde(rename = "propertyName")]
     pub property_name: String,
+    pub location: Option<String>,
     #[serde(rename = "daobitarUrl")]
     pub daobitar_url: String,
     #[serde(rename = "blockchainUrl")]

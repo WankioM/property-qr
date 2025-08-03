@@ -235,7 +235,7 @@ impl UrlBuilder {
             property_name, property_name, daobitat_url
         );
 
-        if let Some(blockchain_url) = blockchain_url {
+        if let Some(ref blockchain_url) = blockchain_url {
             html.push_str(&format!(
                 r#"<a href="{}" class="link-button" target="_blank">View on Blockchain</a>"#,
                 blockchain_url
